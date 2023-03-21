@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cmath>
 using namespace std;
+
 int main() {
     auto begin = std::chrono::steady_clock::now();
 
@@ -43,17 +44,16 @@ int main() {
 
     while ((error > tol) && (iter < iter_max)) {
         iter = iter + 1;
-
-        #pragma acc parallel num_workers(64) vector_length(16) async
-        {
+        if ((iter % 100 == 0) or (iter == iter_max) or (iter==1)) {
+            #pragma acc parallel num_workers(64) vector_length(16) async
+            {
             #pragma acc loop independent collapse(2)
             for (int i = 1; i < size - 1; i++) {
                 for (int j = 1; j < size - 1; j++) {
                     Anew[i * size + j] = 0.25 * (A[(i + 1) * size + j] + A[(i - 1) * size + j] + A[i * size + j - 1] + A[i * size + j + 1]);
                 }
             }
-        }
-        if ((iter % 100 == 0) or (iter == iter_max) or (iter==1)) {
+            }
             #pragma acc wait
             #pragma acc host_data use_device(A, Anew)
             cublasDaxpy(handle, size * size, &alpha, Anew, 1, A, 1);
@@ -65,18 +65,26 @@ int main() {
             cublasDcopy(handle, size * size, Anew, 1, A, 1);
         }
 
+
+        else{
+        #pragma acc parallel num_workers(64) vector_length(16) async
+        {
+            #pragma acc loop independent collapse(2)
+            for (int i = 1; i < size - 1; i++) {
+                for (int j = 1; j < size - 1; j++) {
+                    Anew[i * size + j] = 0.25 * (A[(i + 1) * size + j] + A[(i - 1) * size + j] + A[i * size + j - 1] + A[i * size + j + 1]);
+                }
+            }
+        }
+        }
+
         double* swap = A;
         A = Anew;
         Anew = swap;
 
     }
 
-    if(iter!=iter_max){
-        std::cout << iter_max << ":" << error << "\n";
-    }
-    else{
-        std::cout << iter << ":" << error << "\n";
-    }
+    std::cout << iter << ":" << error << "\n";
 
     #pragma acc exit data delete(A[0:(size * size)], Anew[0:(size * size)])
     delete[] A;

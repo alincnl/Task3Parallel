@@ -4,18 +4,18 @@
 using namespace std;
 
 int main(int argc, char* argv[]) {
-    auto begin = std::chrono::steady_clock::now();z
+    auto begin = std::chrono::steady_clock::now();
 
     double tol = atof(argv[1]);
     int size = atoi(argv[2]), iter_max = atoi(argv[3]);
-
+    
     double* A = new double[size*size];
     double* Anew = new double[size*size];
     int iter = 0;
     double error = 1.0;
     double add = 10.0 / (size - 1);
 
-    #pragma acc enter data copyin(A[0:(size * size)], Anew[0:(size * size)], error)
+    #pragma acc enter data copyin(A[0:(size * size)], Anew[0:(size * size)])
     #pragma acc kernels
     {
     A[0] = 10;
@@ -33,31 +33,45 @@ int main(int argc, char* argv[]) {
         Anew[i*(size)+size - 1] = A[(i - 1)*(size)+size - 1] + add;
 	}
     }
+    #pragma acc data create(error)
+    {
     while ((error > tol) && (iter < iter_max)) {
         iter = iter + 1;
         if ((iter % 100 == 0) or (iter == iter_max) or (iter==1)) {
+            #pragma acc kernels async
+            {
             error = 0.0;
-            #pragma acc update device(error) async
-        }
-        #pragma acc parallel num_workers(64) vector_length(16) async
-        {
+            }
+            #pragma acc parallel num_workers(64) vector_length(16) async
+            {
             #pragma acc loop independent collapse(2) reduction(max:error)
             for (int j = 1; j < size - 1; j++) {
                 for (int i = 1; i < size - 1; i++) {
                     Anew[i * size + j] = 0.25 * (A[(i + 1) * size + j] + A[(i - 1) * size + j] + A[i * size + j - 1] + A[i * size + j + 1]);
-                    if ((iter % 100 == 0) or (iter == iter_max) or (iter==1)) {
-                        error = fmax(error, fabs(Anew[i * size + j] - A[i * size + j]));
-                    }
+                    error = fmax(error, fabs(Anew[i * size + j] - A[i * size + j]));
                 }
             }
         }   
+        }
+        else{
+        #pragma acc parallel num_workers(64) vector_length(16) async
+        {
+            #pragma acc loop independent collapse(2)
+            for (int j = 1; j < size - 1; j++) {
+                for (int i = 1; i < size - 1; i++) {
+                    Anew[i * size + j] = 0.25 * (A[(i + 1) * size + j] + A[(i - 1) * size + j] + A[i * size + j - 1] + A[i * size + j + 1]);
+                }
+            }
+        }   
+        }
         double* swap = A;
 		A = Anew;
 		Anew = swap;
         if ((iter % 100 == 0) or (iter == iter_max) or (iter==1)) {
-            #pragma acc update host(error) async wait
+            #pragma acc update host(error) wait
             std::cout << iter << ":" << error << "\n";
         }
+    }
     }
     #pragma acc exit data delete(A[0:(size * size)], Anew[0:(size * size)], error)
     delete[] A;

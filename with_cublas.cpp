@@ -30,6 +30,11 @@ int main() {
     A[(size - 1)*(size)] = 20;
     A[(size - 1)*(size)+ size - 1] = 30;
 
+    Anew[0] = 10;
+    Anew[size - 1] = 20;
+    Anew[(size - 1)*(size)] = 20;
+    Anew[(size - 1)*(size)+ size - 1] = 30;
+
 	for (size_t i = 1; i < size - 1; i++) {
 		A[i] = A[i - 1] + add;
         A[(size - 1)*(size)+i] = A[(size - 1)*(size)+i - 1] + add;
@@ -67,7 +72,7 @@ int main() {
 
 
         else{
-        #pragma acc parallel num_workers(64) vector_length(16) async
+        #pragma acc parallel num_workers(64) vector_length(16) present(Anew[:size*size], A[:size*size]) async
         {
             #pragma acc loop independent collapse(2)
             for (int i = 1; i < size - 1; i++) {
@@ -86,6 +91,13 @@ int main() {
 
     std::cout << iter << ":" << error << "\n";
 
+    #pragma acc kernels loop seq
+    for(int x = 0; x < size; x++){
+        for(int y = 0; y < size; y++){ 
+            printf("%.2f ",A[x*size+y]);
+        }
+        printf("\n");
+    }
     #pragma acc exit data delete(A[0:(size * size)], Anew[0:(size * size)])
     delete[] A;
     delete[] Anew;

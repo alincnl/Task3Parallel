@@ -4,7 +4,7 @@
 #include <cmath>
 using namespace std;
 
-int main() {
+int main(int argc, char* argv[]) {
     auto begin = std::chrono::steady_clock::now();
 
     double tol = atof(argv[1]);

@@ -1,3 +1,11 @@
+/* 
+ * Реализация уравнения теплопроводности в двумерной области
+ * на равномерных сетках с использованием директив OpenACC. 
+ * Операция редукции (вычисление максимального значения ошибки)
+ * реализуется через вызовы функций из библиотеки cuBLAS.
+*/
+
+// подключение библиотек
 #include <cublas_v2.h>
 #include <iostream>
 #include <chrono>
@@ -5,26 +13,29 @@
 using namespace std;
 
 int main(int argc, char* argv[]) {
+    // время до выполнения программы
     auto begin = std::chrono::steady_clock::now();
 
-    double tol = atof(argv[1]);
-    int size = atoi(argv[2]), iter_max = atoi(argv[3]);
-
+    // инициализация структуры, содержащей контекст
     cublasHandle_t handle;
     cublasCreate(&handle);
 
-    const double alpha = -1;
-    double* A = new double[size*size];
-    double* Anew = new double[size*size];
-
+    // объявление переменных и массивов
     int iter = 0;
     int index_max = 0;
     double error = 1.0;
+    const double alpha = -1;
     double add = 10.0 / (size - 1);
+
+    double tol = atof(argv[1]);
+    int size = atoi(argv[2]), iter_max = atoi(argv[3]);
+    double* A = new double[size*size];
+    double* Anew = new double[size*size];
 
     #pragma acc enter data create(A[0:size*size], Anew[0:size*size])
     #pragma acc kernels
     {
+    // заполнение массивов
     A[0] = 10;
     A[size - 1] = 20;
     A[(size - 1)*(size)] = 20;
@@ -47,9 +58,11 @@ int main(int argc, char* argv[]) {
 	}
     }
 
+    // цикл пересчета ошибки и обновления сетки
     while ((error > tol) && (iter < iter_max)) {
         iter = iter + 1;
         if ((iter % 100 == 0) or (iter == iter_max) or (iter==1)) {
+            // обновление значений массива
             #pragma acc parallel num_workers(64) vector_length(16) async
             {
             #pragma acc loop independent collapse(2)
@@ -59,19 +72,28 @@ int main(int argc, char* argv[]) {
                 }
             }
             }
+
+            // расчет ошибки
+
             #pragma acc wait
             #pragma acc host_data use_device(A, Anew)
+            // вычитаем один массив из другого
             cublasDaxpy(handle, size * size, &alpha, Anew, 1, A, 1);
             #pragma acc host_data use_device(A)
+            // находим индекс наибольшего элемента
             cublasIdamax(handle, size * size, A, 1, &index_max);
             #pragma acc update self(A[index_max-1])
+            // обновляем значение ошибки
             error = fabs(A[index_max - 1]);
             #pragma acc host_data use_device(A, Anew)
+            // копируем данные из одного массива в другой
             cublasDcopy(handle, size * size, Anew, 1, A, 1);
         }
 
 
         else{
+
+        // обновление значений массива
         #pragma acc parallel num_workers(64) vector_length(16) present(Anew[:size*size], A[:size*size]) async
         {
             #pragma acc loop independent collapse(2)
@@ -83,14 +105,15 @@ int main(int argc, char* argv[]) {
         }
         }
 
+        // обмен значениями
         double* swap = A;
         A = Anew;
         Anew = swap;
 
     }
 
+    // печать итогового значения ошибки и сетки
     std::cout << iter << ":" << error << "\n";
-
     #pragma acc kernels loop seq
     for(int x = 0; x < size; x++){
         for(int y = 0; y < size; y++){ 
@@ -98,12 +121,14 @@ int main(int argc, char* argv[]) {
         }
         printf("\n");
     }
+
+    // удаляем из памяти
     #pragma acc exit data delete(A[0:(size * size)], Anew[0:(size * size)])
     delete[] A;
     delete[] Anew;
-
     cublasDestroy(handle);
 
+    // печатаем потраченное время
     auto end = std::chrono::steady_clock::now();
     auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end-begin);
     std::cout << "The time:" << elapsed_ms.count() << "ms\n";
